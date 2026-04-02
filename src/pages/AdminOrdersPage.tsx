@@ -1,18 +1,49 @@
-import { useState } from 'react';
-import { mockOrders } from '../data/mockData';
+import { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { formatCurrency, formatDate, cn } from '../lib/utils';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { Search, Eye, Download, Filter, Calendar } from 'lucide-react';
+import { Search, Eye, Download, Filter, Calendar, Trash2 } from 'lucide-react';
+import { Order } from '../types';
 
 export function AdminOrdersPage() {
   const [searchTerm, setSearchTerm] = useState('');
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredOrders = mockOrders.filter(o => 
+  // Fetch orders
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'orders'), (snapshot) => {
+      const ordersData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order));
+      setOrders(ordersData);
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const filteredOrders = orders.filter(o => 
     o.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     o.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     o.vendedorName.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleUpdateStatus = async (orderId: string, status: Order['status']) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { status });
+    } catch (err) {
+      console.error("Error updating order status:", err);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir este pedido?')) return;
+    try {
+      await deleteDoc(doc(db, 'orders', orderId));
+    } catch (err) {
+      console.error("Error deleting order:", err);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -97,18 +128,34 @@ export function AdminOrdersPage() {
                     {formatCurrency(order.totalAmount)}
                   </td>
                   <td className="p-4">
-                    <span className={cn(
-                      "px-2 py-1 text-[10px] font-black uppercase rounded",
-                      order.status === 'completed' ? "bg-green-50 text-green-600" : 
-                      order.status === 'pending' ? "bg-yellow-50 text-yellow-600" : "bg-red-50 text-red-600"
-                    )}>
-                      {order.status}
-                    </span>
+                    <select
+                      value={order.status}
+                      onChange={(e) => handleUpdateStatus(order.id, e.target.value as Order['status'])}
+                      className={cn(
+                        "px-2 py-1 text-[10px] font-black uppercase rounded border-none focus:ring-0 cursor-pointer",
+                        order.status === 'completed' ? "bg-green-50 text-green-600" : 
+                        order.status === 'pending' ? "bg-yellow-50 text-yellow-600" : "bg-red-50 text-red-600"
+                      )}
+                    >
+                      <option value="pending">Pendente</option>
+                      <option value="completed">Concluído</option>
+                      <option value="cancelled">Cancelado</option>
+                    </select>
                   </td>
                   <td className="p-4 text-right">
-                    <Button variant="ghost" size="icon" className="hover:text-red-800">
-                      <Eye className="w-4 h-4" />
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" className="hover:text-red-800">
+                        <Eye className="w-4 h-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="hover:text-red-800"
+                        onClick={() => handleDeleteOrder(order.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}

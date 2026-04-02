@@ -1,16 +1,43 @@
 import { Package, ShoppingCart, Users, TrendingUp, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import { mockProducts, mockOrders, mockUsers } from '../data/mockData';
+import { db } from '../firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
+import { useState, useEffect } from 'react';
+import { Order, Product, User } from '../types';
 
 export function AdminDashboard() {
-  const totalSales = mockOrders.reduce((acc, curr) => acc + curr.totalAmount, 0);
-  const sellersCount = mockUsers.filter(u => u.role === 'vendedor').length;
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [sellers, setSellers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
+      setOrders(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order)));
+    });
+    const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+      setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
+    });
+    const unsubSellers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setSellers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as User)).filter(u => u.role === 'vendedor'));
+      setIsLoading(false);
+    });
+
+    return () => {
+      unsubOrders();
+      unsubProducts();
+      unsubSellers();
+    };
+  }, []);
+
+  const totalSales = orders.filter(o => o.status === 'completed').reduce((acc, curr) => acc + curr.totalAmount, 0);
+  const sellersCount = sellers.length;
 
   const stats = [
     { label: 'Total em Vendas', value: formatCurrency(totalSales), icon: TrendingUp, trend: '+12.5%', trendUp: true },
-    { label: 'Pedidos Realizados', value: mockOrders.length, icon: ShoppingCart, trend: '+5.2%', trendUp: true },
-    { label: 'Produtos Ativos', value: mockProducts.length, icon: Package, trend: 'Estável', trendUp: true },
+    { label: 'Pedidos Realizados', value: orders.length, icon: ShoppingCart, trend: '+5.2%', trendUp: true },
+    { label: 'Produtos Ativos', value: products.length, icon: Package, trend: 'Estável', trendUp: true },
     { label: 'Vendedores', value: sellersCount, icon: Users, trend: '+2', trendUp: true },
   ];
 
@@ -61,7 +88,7 @@ export function AdminDashboard() {
             <button className="text-xs font-bold text-red-800 uppercase hover:underline">Ver todos</button>
           </div>
           <div className="space-y-4">
-            {mockOrders.slice(0, 5).map((order) => (
+            {orders.sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()).slice(0, 5).map((order) => (
               <div key={order.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 bg-black text-white rounded-lg flex items-center justify-center font-bold text-xs">
@@ -92,7 +119,7 @@ export function AdminDashboard() {
             <button className="text-xs font-bold text-red-800 uppercase hover:underline">Gerenciar</button>
           </div>
           <div className="space-y-4">
-            {mockProducts.slice(0, 5).map((product) => (
+            {products.slice(0, 5).map((product) => (
               <div key={product.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                 <div className="flex items-center gap-4">
                   <img src={product.images[0]} alt="" className="w-10 h-10 object-cover rounded-lg" referrerPolicy="no-referrer" />

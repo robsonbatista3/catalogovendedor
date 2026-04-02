@@ -1,19 +1,24 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { mockProducts } from '../data/mockData';
+import { db } from '../firebase';
+import { doc, getDoc, addDoc, collection, updateDoc, increment } from 'firebase/firestore';
 import { formatCurrency } from '../lib/utils';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle2, ChevronLeft, CreditCard, MapPin, User as UserIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAuth } from '../lib/auth';
-import { Order } from '../types';
+import { Order, Product } from '../types';
 
 export function OrderFormPage() {
   const { productId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const product = mockProducts.find(p => p.id === productId);
+  
+  const [product, setProduct] = useState<Product | null>(null);
+  const [isDataLoading, setIsDataLoading] = useState(true);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     clientName: '',
@@ -22,42 +27,65 @@ export function OrderFormPage() {
     quantity: 1,
   });
 
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  useEffect(() => {
+    if (!productId) return;
+    const fetchProduct = async () => {
+      const docRef = doc(db, 'products', productId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setProduct({ ...docSnap.data(), id: docSnap.id } as Product);
+      }
+      setIsDataLoading(false);
+    };
+    fetchProduct();
+  }, [productId]);
+
+  if (isDataLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-red-800 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!product) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !product) return;
     
     setIsLoading(true);
 
-    // Create the order object with seller info
-    const newOrder: Order = {
-      id: `ORD-${Math.floor(Math.random() * 100000)}`,
-      clientId: `c${Date.now()}`,
-      clientName: formData.clientName,
-      clientAddress: formData.clientAddress,
-      clientPhone: formData.clientPhone,
-      productId: product.id,
-      productName: product.name,
-      productPrice: product.price,
-      quantity: formData.quantity,
-      totalAmount: product.price * formData.quantity,
-      vendedorId: user.id,
-      vendedorName: user.name,
-      orderDate: new Date().toISOString(),
-      status: 'pending',
-    };
+    try {
+      const orderData = {
+        clientId: `c${Date.now()}`,
+        clientName: formData.clientName,
+        clientAddress: formData.clientAddress,
+        clientPhone: formData.clientPhone,
+        productId: product.id,
+        productName: product.name,
+        productPrice: product.price,
+        quantity: formData.quantity,
+        totalAmount: product.price * formData.quantity,
+        vendedorId: user.id,
+        vendedorName: user.name,
+        orderDate: new Date().toISOString(),
+        status: 'pending',
+      };
 
-    console.log('Pedido realizado:', newOrder);
+      await addDoc(collection(db, 'orders'), orderData);
+      
+      // Update product stock
+      await updateDoc(doc(db, 'products', product.id), {
+        stock: increment(-formData.quantity)
+      });
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
       setIsSubmitted(true);
-    }, 1500);
+    } catch (err) {
+      console.error("Error creating order:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isSubmitted) {
@@ -75,7 +103,7 @@ export function OrderFormPage() {
             Pedido <span className="text-red-800">Confirmado!</span>
           </h1>
           <p className="text-gray-600 font-medium">
-            O pedido #ORD-{Math.floor(Math.random() * 100000)} foi realizado com sucesso para <span className="font-bold text-black">{formData.clientName}</span>.
+            O pedido foi realizado com sucesso para <span className="font-bold text-black">{formData.clientName}</span>.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-4 justify-center pt-8">

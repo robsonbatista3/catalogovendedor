@@ -1,16 +1,21 @@
-import React, { useState, useRef } from 'react';
-import { mockProducts as initialMockProducts } from '../data/mockData';
+import React, { useState, useRef, useEffect } from 'react';
+import { db } from '../firebase';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { formatCurrency, cn } from '../lib/utils';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Modal } from '../components/Modal';
 import { Plus, Search, Edit2, Trash2, MoreVertical, Filter, Image as ImageIcon, X, UploadCloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Product } from '../types';
 
 export function AdminProductsPage() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [products, setProducts] = useState(initialMockProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
   // Form State
@@ -23,6 +28,15 @@ export function AdminProductsPage() {
   });
   const [images, setImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch products
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'products'), (snapshot) => {
+      const productsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
+      setProducts(productsData);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -47,35 +61,70 @@ export function AdminProductsPage() {
     setImages(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleCreateProduct = (e: React.FormEvent) => {
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      const newProduct = {
-        id: `p${Date.now()}`,
-        name: formData.name,
-        category: formData.category,
-        price: parseFloat(formData.price),
-        stock: parseInt(formData.stock),
-        description: formData.description,
-        images: images.length > 0 ? images : ['https://picsum.photos/seed/new/800/800'],
-        specifications: [],
-        tags: ['Novidade'],
-        rating: 0,
-        reviewCount: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+    const productData = {
+      name: formData.name,
+      category: formData.category,
+      price: parseFloat(formData.price),
+      stock: parseInt(formData.stock),
+      description: formData.description,
+      images: images.length > 0 ? images : ['https://picsum.photos/seed/new/800/800'],
+      updatedAt: new Date().toISOString(),
+    };
 
-      setProducts([newProduct, ...products]);
-      setIsLoading(false);
+    try {
+      if (editingProduct) {
+        await updateDoc(doc(db, 'products', editingProduct.id), productData);
+      } else {
+        const newProduct = {
+          ...productData,
+          specifications: [],
+          tags: ['Novidade'],
+          rating: 0,
+          reviewCount: 0,
+          createdAt: new Date().toISOString(),
+        };
+        await addDoc(collection(db, 'products'), newProduct);
+      }
       setIsModalOpen(false);
-      // Reset form
+      setEditingProduct(null);
       setFormData({ name: '', category: '', price: '', stock: '', description: '' });
       setImages([]);
-    }, 1500);
+    } catch (err) {
+      console.error("Error saving product:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteProduct = async () => {
+    if (!productToDelete) return;
+    setIsLoading(true);
+    try {
+      await deleteDoc(doc(db, 'products', productToDelete.id));
+      setIsDeleteModalOpen(false);
+      setProductToDelete(null);
+    } catch (err) {
+      console.error("Error deleting product:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEditProduct = (product: Product) => {
+    setEditingProduct(product);
+    setFormData({
+      name: product.name,
+      category: product.category,
+      price: product.price.toString(),
+      stock: product.stock.toString(),
+      description: product.description,
+    });
+    setImages(product.images);
+    setIsModalOpen(true);
   };
 
   return (
@@ -171,10 +220,19 @@ export function AdminProductsPage() {
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex justify-end gap-2">
-                      <button className="p-2 text-gray-400 hover:text-black transition-colors">
+                      <button 
+                        className="p-2 text-gray-400 hover:text-black transition-colors"
+                        onClick={() => handleEditProduct(product)}
+                      >
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button className="p-2 text-gray-400 hover:text-red-600 transition-colors">
+                      <button 
+                        className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                        onClick={() => {
+                          setProductToDelete(product);
+                          setIsDeleteModalOpen(true);
+                        }}
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                       <button className="p-2 text-gray-400 hover:text-black transition-colors">
@@ -201,7 +259,7 @@ export function AdminProductsPage() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => !isLoading && setIsModalOpen(false)}
-        title="Adicionar Novo Produto"
+        title={editingProduct ? "Editar Produto" : "Adicionar Novo Produto"}
         className="max-w-2xl"
       >
         <form onSubmit={handleCreateProduct} className="space-y-6">
@@ -330,6 +388,43 @@ export function AdminProductsPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => !isLoading && setIsDeleteModalOpen(false)}
+        title="Excluir Produto"
+      >
+        <div className="space-y-6">
+          <div className="p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3">
+            <Trash2 className="w-5 h-5 text-red-600 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-bold text-red-800 uppercase tracking-tight">Você tem certeza?</p>
+              <p className="text-xs text-red-600 font-medium">
+                Esta ação não pode ser desfeita. O produto <span className="font-black">"{productToDelete?.name}"</span> será removido permanentemente do catálogo.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="flex-1 uppercase font-black tracking-widest"
+              onClick={() => setIsDeleteModalOpen(false)}
+              disabled={isLoading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-red-600 hover:bg-red-700 uppercase font-black tracking-widest"
+              onClick={handleDeleteProduct}
+              isLoading={isLoading}
+            >
+              Excluir
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

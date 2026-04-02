@@ -1,14 +1,27 @@
 import { useAuth } from '../lib/auth';
-import { mockOrders } from '../data/mockData';
+import { db } from '../firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { formatCurrency, formatDate, cn } from '../lib/utils';
 import { ShoppingBag, Clock, CheckCircle2, XCircle, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useState, useEffect } from 'react';
+import { Order } from '../types';
 
 export function SellerOrdersPage() {
   const { user } = useAuth();
+  const [myOrders, setMyOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Filter orders for the logged-in seller
-  const myOrders = mockOrders.filter(o => o.vendedorId === user?.id);
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'orders'), where('vendedorId', '==', user.id));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ordersData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order));
+      setMyOrders(ordersData);
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {

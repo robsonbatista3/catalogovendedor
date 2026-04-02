@@ -1,17 +1,31 @@
-import { useState } from 'react';
-import { mockProducts } from '../data/mockData';
+import { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { ProductCard } from '../components/ProductCard';
 import { Input } from '../components/Input';
 import { Search, Filter, SlidersHorizontal } from 'lucide-react';
 import { motion } from 'motion/react';
+import { Product } from '../types';
 
 export function SellerCatalog() {
   const [searchTerm, setSearchTerm] = useState('');
   const [category, setCategory] = useState('Todos');
-  
-  const categories = ['Todos', ...new Set(mockProducts.map(p => p.category))];
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredProducts = mockProducts.filter(p => {
+  // Fetch products
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'products'), (snapshot) => {
+      const productsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
+      setProducts(productsData);
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+  
+  const categories = ['Todos', ...new Set(products.map(p => p.category))];
+
+  const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          p.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = category === 'Todos' || p.category === category;

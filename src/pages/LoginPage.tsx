@@ -13,23 +13,34 @@ export function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   
-  const { login } = useAuth();
+  const { login, isAuthReady } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAuthReady) return;
+    
     setIsLoading(true);
     setError('');
     
     try {
-      await login(email, role);
-      navigate(role === 'admin' ? '/admin' : '/vendedor/catalog');
-    } catch (err) {
-      setError('Credenciais inválidas ou usuário não encontrado.');
-    } finally {
+      await login(email, password);
+      // Navigation is handled by useEffect or after login success
+      // Since we don't know the role until profile is fetched, 
+      // we'll wait for the user to be set in AuthProvider and then navigate from there or here
+    } catch (err: any) {
+      setError(err.message || 'Credenciais inválidas ou usuário não encontrado.');
       setIsLoading(false);
     }
   };
+
+  // Effect to handle navigation after login
+  const { user } = useAuth();
+  React.useEffect(() => {
+    if (user) {
+      navigate(user.role === 'admin' ? '/admin' : '/vendedor/catalog');
+    }
+  }, [user, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">

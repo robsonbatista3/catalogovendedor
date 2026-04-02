@@ -1,22 +1,26 @@
-import React, { useState } from 'react';
-import { mockUsers as initialMockUsers, mockOrders } from '../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import { collection, query, where, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import { formatDate, formatCurrency, cn } from '../lib/utils';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Modal } from '../components/Modal';
 import { UserPlus, Search, Mail, Trash2, Key, User as UserIcon, Lock, CheckCircle2, Phone, Eye, ShoppingBag } from 'lucide-react';
 import { motion } from 'motion/react';
+import { User, Order } from '../types';
 
 export function AdminSellersPage() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sellers, setSellers] = useState(initialMockUsers.filter(u => u.role === 'vendedor'));
+  const [sellers, setSellers] = useState<User[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [sellerToDelete, setSellerToDelete] = useState<any>(null);
-  const [selectedSeller, setSelectedSeller] = useState<any>(null);
+  const [sellerToDelete, setSellerToDelete] = useState<User | null>(null);
+  const [selectedSeller, setSelectedSeller] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -25,53 +29,79 @@ export function AdminSellersPage() {
     password: '',
   });
 
+  // Fetch sellers
+  useEffect(() => {
+    const q = query(collection(db, 'users'), where('role', '==', 'vendedor'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const sellersData = snapshot.docs.map(doc => doc.data() as User);
+      setSellers(sellersData);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch orders for detail view
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'orders'), (snapshot) => {
+      const ordersData = snapshot.docs.map(doc => doc.data() as Order);
+      setOrders(ordersData);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const filteredSellers = sellers.filter(u => 
     u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleCreateSeller = (e: React.FormEvent) => {
+  const handleCreateSeller = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setError('');
 
-    // Simulate API call
-    setTimeout(() => {
-      const newSeller = {
-        id: `u${Date.now()}`,
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        role: 'vendedor' as const,
-        createdAt: new Date().toISOString(),
-      };
+    try {
+      const response = await fetch('/api/sellers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
 
-      setSellers([newSeller, ...sellers]);
-      setIsLoading(false);
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Erro ao criar vendedor');
+      }
+
       setIsSuccess(true);
-      
-      // Reset form and close modal after a delay
       setTimeout(() => {
         setIsModalOpen(false);
         setIsSuccess(false);
         setFormData({ name: '', email: '', phone: '', password: '' });
       }, 2000);
-    }, 1500);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(true); // Keep it true during success delay
+      setTimeout(() => setIsLoading(false), 2000);
+    }
   };
 
-  const handleDeleteSeller = () => {
+  const handleDeleteSeller = async () => {
     if (!sellerToDelete) return;
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      setSellers(sellers.filter(s => s.id !== sellerToDelete.id));
-      setIsLoading(false);
+    try {
+      await deleteDoc(doc(db, 'users', sellerToDelete.id));
+      // Note: This only deletes the Firestore profile. 
+      // To delete the Auth user, we'd need another backend API.
       setIsDeleteModalOpen(false);
       setSellerToDelete(null);
-    }, 1000);
+    } catch (err: any) {
+      console.error("Error deleting seller:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const getSellerOrders = (sellerId: string) => {
-    return mockOrders.filter(o => o.vendedorId === sellerId);
+    return orders.filter(o => o.vendedorId === sellerId);
   };
 
   return (
@@ -243,6 +273,12 @@ export function AdminSellersPage() {
                 required
                 disabled={isLoading}
               />
+
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-red-600 text-[10px] font-black uppercase text-center">
+                  {error}
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-2">

@@ -1,16 +1,40 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { mockProducts } from '../data/mockData';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { db } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { formatCurrency, cn } from '../lib/utils';
 import { Button } from '../components/Button';
 import { Star, ChevronLeft, ChevronRight, ShoppingCart, ShieldCheck, Truck, RefreshCcw } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Product } from '../types';
 
 export function ProductDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const product = mockProducts.find(p => p.id === id);
+  const [product, setProduct] = useState<Product | null>(null);
   const [activeImage, setActiveImage] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    const unsubscribe = onSnapshot(doc(db, 'products', id), (doc) => {
+      if (doc.exists()) {
+        setProduct({ ...doc.data(), id: doc.id } as Product);
+      } else {
+        setProduct(null);
+      }
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-red-800 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!product) {
     return (
