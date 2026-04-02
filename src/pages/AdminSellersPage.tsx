@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, query, where, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { collection, query, where, onSnapshot, doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { formatDate, formatCurrency, cn } from '../lib/utils';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -57,29 +60,48 @@ export function AdminSellersPage() {
     setIsLoading(true);
     setError('');
 
+    let secondaryApp;
     try {
-      const response = await fetch('/api/sellers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+      // Use a secondary Firebase app to create the user without logging out the admin
+      secondaryApp = initializeApp(firebaseConfig, `Secondary-${Date.now()}`);
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      // 1. Create the Auth user
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, formData.email, formData.password);
+      const uid = userCredential.user.uid;
+
+      // 2. Create the Firestore profile using the main app's db
+      await setDoc(doc(db, 'users', uid), {
+        id: uid,
+        email: formData.email,
+        name: formData.name,
+        phone: formData.phone || '',
+        role: 'vendedor',
+        createdAt: new Date().toISOString(),
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Erro ao criar vendedor');
-      }
-
+      // 3. Sign out from secondary app and cleanup
+      await signOut(secondaryAuth);
+      
       setIsSuccess(true);
       setTimeout(() => {
         setIsModalOpen(false);
         setIsSuccess(false);
         setFormData({ name: '', email: '', phone: '', password: '' });
+        setIsLoading(false);
       }, 2000);
     } catch (err: any) {
-      setError(err.message);
+      console.error("Error creating seller:", err);
+      setError(err.message || 'Erro ao criar vendedor');
+      setIsLoading(false);
     } finally {
-      setIsLoading(true); // Keep it true during success delay
-      setTimeout(() => setIsLoading(false), 2000);
+      if (secondaryApp) {
+        try {
+          await deleteApp(secondaryApp);
+        } catch (e) {
+          console.error("Error deleting secondary app:", e);
+        }
+      }
     }
   };
 

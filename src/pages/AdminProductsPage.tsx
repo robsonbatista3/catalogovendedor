@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { formatCurrency, cn } from '../lib/utils';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -77,17 +77,20 @@ export function AdminProductsPage() {
 
     try {
       if (editingProduct) {
-        await updateDoc(doc(db, 'products', editingProduct.id), productData);
+        const updatedData = { ...productData, id: editingProduct.id };
+        await updateDoc(doc(db, 'products', editingProduct.id), updatedData);
       } else {
+        const newDocRef = doc(collection(db, 'products'));
         const newProduct = {
           ...productData,
+          id: newDocRef.id,
           specifications: [],
           tags: ['Novidade'],
           rating: 0,
           reviewCount: 0,
           createdAt: new Date().toISOString(),
         };
-        await addDoc(collection(db, 'products'), newProduct);
+        await setDoc(newDocRef, newProduct);
       }
       setIsModalOpen(false);
       setEditingProduct(null);

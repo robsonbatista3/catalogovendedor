@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import admin from 'firebase-admin';
+import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,11 +11,19 @@ const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+let firestoreDatabaseId = '(default)';
+
 if (fs.existsSync(configPath)) {
   const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+  
   admin.initializeApp({
     projectId: firebaseConfig.projectId,
   });
+  console.log(`>>> Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
+  console.log(`>>> Using Firestore database: ${firestoreDatabaseId}`);
+} else {
+  console.warn(">>> firebase-applet-config.json not found. Firebase Admin not initialized.");
 }
 
 async function startServer() {
@@ -37,7 +46,7 @@ async function startServer() {
         displayName: name,
       });
 
-      const db = admin.firestore();
+      const db = getFirestore(firestoreDatabaseId);
       await db.collection('users').doc(userRecord.uid).set({
         id: userRecord.uid,
         email,

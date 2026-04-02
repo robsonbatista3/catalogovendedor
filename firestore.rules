@@ -1,24 +1,20 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    
     // ===============================================================
     // Assumed Data Model
     // ===============================================================
     //
     // Collection: users
-    // Document ID: {userId} (matches Firebase Auth UID)
     // Fields:
     //   - id: string (required)
-    //   - email: string (required, format: email)
+    //   - email: string (required, email format)
     //   - name: string (required)
     //   - phone: string (optional)
     //   - role: string (required, enum: ['admin', 'vendedor'])
-    //   - createdAt: string (required, format: date-time)
+    //   - createdAt: string (required, date-time)
     //
     // Collection: products
-    // Document ID: {productId}
     // Fields:
     //   - id: string (required)
     //   - name: string (required)
@@ -26,21 +22,21 @@ service cloud.firestore {
     //   - price: number (required, positive)
     //   - images: list of strings (required)
     //   - category: string (required)
-    //   - stock: number (required, non-negative)
-    //   - createdAt: string (required)
-    //   - updatedAt: string (required)
+    //   - stock: number (required, positive)
+    //   - createdAt: string (required, date-time)
+    //   - updatedAt: string (required, date-time)
     //
     // Collection: orders
-    // Document ID: {orderId}
     // Fields:
     //   - id: string (required)
     //   - clientId: string (required)
     //   - clientName: string (required)
     //   - productId: string (required)
+    //   - quantity: number (required, positive)
+    //   - totalAmount: number (required, positive)
     //   - vendedorId: string (required)
-    //   - totalAmount: number (required)
+    //   - orderDate: string (required, date-time)
     //   - status: string (required, enum: ['pending', 'completed', 'cancelled'])
-    //   - orderDate: string (required)
     //
     // ===============================================================
 
@@ -57,77 +53,83 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        (request.auth.token.email == "robsonbatista3@gmail.com" && request.auth.token.email_verified == true)
-      );
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "robsonbatista3@gmail.com" && request.auth.token.email_verified == true));
     }
 
-    function isValidUser(data) {
-      return data.keys().hasAll(['id', 'email', 'name', 'role', 'createdAt']) &&
-             data.id is string &&
-             data.email is string &&
-             data.name is string &&
-             data.role in ['admin', 'vendedor'] &&
-             data.createdAt is string;
+    function isVendedor() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'vendedor';
     }
 
-    function isValidProduct(data) {
-      return data.keys().hasAll(['id', 'name', 'price', 'category', 'stock', 'createdAt', 'updatedAt']) &&
-             data.id is string &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
-             data.price is number && data.price >= 0 &&
-             data.category is string &&
-             data.stock is number && data.stock >= 0;
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
-    function isValidOrder(data) {
-      return data.keys().hasAll(['id', 'clientId', 'clientName', 'productId', 'vendedorId', 'totalAmount', 'status', 'orderDate']) &&
-             data.id is string &&
-             data.vendedorId is string &&
-             data.status in ['pending', 'completed', 'cancelled'] &&
-             data.totalAmount is number && data.totalAmount >= 0;
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
     }
 
     // ===============================================================
-    // Rules
+    // Collection Rules
     // ===============================================================
 
+    // Users Collection
     match /users/{userId} {
-      // Users can read their own profile. Admins can read all profiles.
+      function isValidUser(data) {
+        return data.keys().hasAll(['id', 'email', 'name', 'role', 'createdAt']) &&
+               data.id is string &&
+               isValidEmail(data.email) &&
+               data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+               data.role in ['admin', 'vendedor'] &&
+               isValidDateString(data.createdAt);
+      }
+
       allow read: if isOwner(userId) || isAdmin();
       
-      // Only admins can create or update user profiles (except for bootstrapping)
-      // A user can create their own profile if they are the bootstrap admin
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
-        isAdmin() || (request.auth.uid == userId && request.auth.token.email == "robsonbatista3@gmail.com")
-      );
+      // Only admins can create/update roles, or a user can create their own profile as 'vendedor' (if not already exists)
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                      (isAdmin() || (isOwner(userId) && request.resource.data.role == 'vendedor'));
       
-      allow update: if isAdmin() && isValidUser(request.resource.data) && 
-                    request.resource.data.id == resource.data.id;
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
+                      (isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role));
       
       allow delete: if isAdmin();
     }
 
+    // Products Collection
     match /products/{productId} {
-      // Anyone authenticated can read products
+      function isValidProduct(data) {
+        return data.keys().hasAll(['name', 'price', 'category', 'stock', 'createdAt']) &&
+               data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+               data.price is number && data.price >= 0 &&
+               data.category is string &&
+               data.stock is number && data.stock >= 0 &&
+               isValidDateString(data.createdAt);
+      }
+
       allow read: if isAuthenticated();
-      
-      // Only admins can manage products
-      allow write: if isAdmin() && isValidProduct(request.resource.data);
+      allow write: if isAdmin();
     }
 
+    // Orders Collection
     match /orders/{orderId} {
-      // Vendedores can read their own orders. Admins can read all.
-      allow read: if isAdmin() || (isAuthenticated() && resource.data.vendedorId == request.auth.uid);
-      
-      // Vendedores can create orders. Admins can manage all.
-      allow create: if isAuthenticated() && isValidOrder(request.resource.data) && (
-        isAdmin() || request.resource.data.vendedorId == request.auth.uid
-      );
-      
-      allow update: if isAdmin() && isValidOrder(request.resource.data);
-      
+      function isValidOrder(data) {
+        return data.keys().hasAll(['clientId', 'clientName', 'productId', 'quantity', 'totalAmount', 'vendedorId', 'orderDate', 'status']) &&
+               data.clientId is string &&
+               data.clientName is string &&
+               data.productId is string &&
+               data.quantity is number && data.quantity > 0 &&
+               data.totalAmount is number && data.totalAmount >= 0 &&
+               data.vendedorId is string &&
+               isValidDateString(data.orderDate) &&
+               data.status in ['pending', 'completed', 'cancelled'];
+      }
+
+      allow read: if isAdmin() || (isAuthenticated() && (resource.data.vendedorId == request.auth.uid));
+      allow create: if isAuthenticated() && isValidOrder(request.resource.data) && 
+                      (isAdmin() || request.resource.data.vendedorId == request.auth.uid);
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.vendedorId == request.auth.uid && isValidOrder(request.resource.data));
       allow delete: if isAdmin();
     }
   }
